@@ -1,0 +1,38 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-04-16 19:30:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "fields": [
+  {
+   "fieldname": "quality",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Quality"
+  },
+  {
+   "fieldname": "link",
+   "fieldtype": "Long Text",
+   "in_list_view": 1,
+   "label": "Link"
+  },
+  {
+   "fieldname": "size",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Size (Bytes)"
+  }
+ ],
+ "istable": 1,
+ "modified": "2026-04-16 19:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Vimeo",
+ "name": "Vimeo Video Download",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

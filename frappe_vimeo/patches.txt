@@ -4,3 +4,5 @@
 
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
+frappe_vimeo.patches.v1_0.create_vimeo_manager_role
+frappe_vimeo.patches.v1_0.add_vimeo_folder_sidebar_item

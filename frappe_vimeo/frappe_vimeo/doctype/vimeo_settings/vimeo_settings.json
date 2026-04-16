@@ -1,0 +1,99 @@
+{
+ "actions": [],
+ "creation": "2026-04-16 10:30:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "credentials_section",
+  "access_token",
+  "default_privacy",
+  "default_embed_domain",
+  "upload_chunk_size_mb",
+  "connection_section",
+  "api_base_url",
+  "connection_status",
+  "last_tested_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "credentials_section",
+   "fieldtype": "Section Break",
+   "label": "Credentials"
+  },
+  {
+   "description": "Personal Access Token from https://developer.vimeo.com/apps",
+   "fieldname": "access_token",
+   "fieldtype": "Password",
+   "label": "Access Token",
+   "reqd": 1
+  },
+  {
+   "default": "unlisted",
+   "description": "Default privacy applied to uploads when not explicitly passed.",
+   "fieldname": "default_privacy",
+   "fieldtype": "Select",
+   "label": "Default Privacy",
+   "options": "anonymous\nnobody\ndisable\nunlisted"
+  },
+  {
+   "description": "Whitelist domain used when privacy is 'disable' (embed-only).",
+   "fieldname": "default_embed_domain",
+   "fieldtype": "Data",
+   "label": "Default Embed Domain"
+  },
+  {
+   "default": "1",
+   "description": "Chunk size in MB for browser uploads to Frappe before forwarding to Vimeo.",
+   "fieldname": "upload_chunk_size_mb",
+   "fieldtype": "Int",
+   "label": "Upload Chunk Size (MB)"
+  },
+  {
+   "fieldname": "connection_section",
+   "fieldtype": "Section Break",
+   "label": "Connection"
+  },
+  {
+   "default": "https://api.vimeo.com",
+   "fieldname": "api_base_url",
+   "fieldtype": "Data",
+   "label": "API Base URL"
+  },
+  {
+   "fieldname": "connection_status",
+   "fieldtype": "Data",
+   "label": "Connection Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_tested_on",
+   "fieldtype": "Datetime",
+   "label": "Last Tested On",
+   "read_only": 1
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-04-16 10:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Vimeo",
+ "name": "Vimeo Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

@@ -1,0 +1,56 @@
+{
+ "app": "frappe_vimeo",
+ "creation": "2026-04-16 19:00:00",
+ "docstatus": 0,
+ "doctype": "Workspace Sidebar",
+ "header_icon": "video",
+ "idx": 0,
+ "items": [
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "video",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Vimeo Video",
+   "link_to": "Vimeo Video",
+   "link_type": "DocType",
+   "open_in_new_tab": 0,
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "folder",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Vimeo Folder",
+   "link_to": "Vimeo Folder",
+   "link_type": "DocType",
+   "open_in_new_tab": 0,
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "settings",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Vimeo Settings",
+   "link_to": "Vimeo Settings",
+   "link_type": "DocType",
+   "open_in_new_tab": 0,
+   "show_arrow": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-04-16 19:00:00",
+ "modified_by": "Administrator",
+ "module": "Frappe Vimeo",
+ "name": "Vimeo",
+ "owner": "Administrator",
+ "standard": 1,
+ "title": "Vimeo"
+}

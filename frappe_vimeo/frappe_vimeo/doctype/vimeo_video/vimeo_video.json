@@ -1,0 +1,256 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:VIMEO-{#####}",
+ "creation": "2026-04-16 19:30:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "image_field": "thumbnail_url",
+ "field_order": [
+  "details_section",
+  "video_title",
+  "privacy",
+  "description",
+  "thumbnail_image",
+  "extra_metadata_section",
+  "width",
+  "height",
+  "language",
+  "license",
+  "tags",
+  "sync_section",
+  "status",
+  "transcode_status",
+  "last_synced_on",
+  "links_section",
+  "vimeo_id",
+  "vimeo_uri",
+  "vimeo_url",
+  "vimeo_upload_link",
+  "player_embed_url",
+  "thumbnail_url",
+  "embed_html",
+  "metadata_section",
+  "duration",
+  "created_time",
+  "modified_time",
+  "download_links_section",
+  "downloads"
+ ],
+ "fields": [
+  {
+   "fieldname": "details_section",
+   "fieldtype": "Section Break",
+   "label": "Details"
+  },
+  {
+   "fieldname": "video_title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Video Title",
+   "reqd": 1
+  },
+  {
+   "default": "unlisted",
+   "fieldname": "privacy",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Privacy",
+   "options": "anybody\nanonymous\ncontacts\ndisable\nnobody\npassword\nunlisted\nusers"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text Editor",
+   "label": "Description"
+  },
+  {
+   "description": "Optional local image file to upload as the Vimeo thumbnail.",
+   "fieldname": "thumbnail_image",
+   "fieldtype": "Attach Image",
+   "label": "Thumbnail Image"
+  },
+  {
+   "fieldname": "extra_metadata_section",
+   "fieldtype": "Section Break",
+   "label": "Extra Metadata"
+  },
+  {
+   "fieldname": "width",
+   "fieldtype": "Int",
+   "label": "Width",
+   "read_only": 1
+  },
+  {
+   "fieldname": "height",
+   "fieldtype": "Int",
+   "label": "Height",
+   "read_only": 1
+  },
+  {
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "label": "Language",
+   "read_only": 1
+  },
+  {
+   "fieldname": "license",
+   "fieldtype": "Data",
+   "label": "License",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tags",
+   "fieldtype": "Small Text",
+   "label": "Tags",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sync_section",
+   "fieldtype": "Section Break",
+   "label": "Sync Status"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Vimeo Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transcode_status",
+   "fieldtype": "Data",
+   "label": "Transcode Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_synced_on",
+   "fieldtype": "Datetime",
+   "label": "Last Synced On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "links_section",
+   "fieldtype": "Section Break",
+   "label": "Vimeo Links"
+  },
+  {
+   "fieldname": "vimeo_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Vimeo ID",
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "vimeo_uri",
+   "fieldtype": "Data",
+   "label": "Vimeo URI",
+   "read_only": 1
+  },
+  {
+   "fieldname": "vimeo_url",
+   "fieldtype": "Data",
+   "label": "Vimeo URL",
+   "read_only": 1
+  },
+  {
+   "fieldname": "vimeo_upload_link",
+   "fieldtype": "Long Text",
+   "label": "Vimeo Upload Link",
+   "read_only": 1
+  },
+  {
+   "fieldname": "player_embed_url",
+   "fieldtype": "Data",
+   "label": "Player Embed URL",
+   "read_only": 1
+  },
+  {
+   "fieldname": "thumbnail_url",
+   "fieldtype": "Attach Image",
+   "label": "Thumbnail URL",
+   "read_only": 1
+  },
+  {
+   "fieldname": "embed_html",
+   "fieldtype": "Code",
+   "label": "Embed HTML",
+   "options": "HTML",
+   "read_only": 1
+  },
+  {
+   "fieldname": "metadata_section",
+   "fieldtype": "Section Break",
+   "label": "Video Metadata"
+  },
+  {
+   "fieldname": "duration",
+   "fieldtype": "Int",
+   "label": "Duration (Seconds)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_time",
+   "fieldtype": "Datetime",
+   "label": "Created Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "modified_time",
+   "fieldtype": "Datetime",
+   "label": "Modified Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "download_links_section",
+   "fieldtype": "Section Break",
+   "label": "Download Links"
+  },
+  {
+   "fieldname": "downloads",
+   "fieldtype": "Table",
+   "label": "Available Downloads",
+   "options": "Vimeo Video Download",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-16 19:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Vimeo",
+ "name": "Vimeo Video",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Vimeo Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "video_title",
+ "track_changes": 1
+}

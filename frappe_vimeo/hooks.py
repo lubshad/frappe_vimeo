@@ -5,6 +5,8 @@ app_description = "App for vimeo creadential and action apis "
 app_email = "lubshad4u4@gmail.com"
 app_license = "mit"
 
+treeviews = ["Vimeo Folder"]
+
 # Apps
 # ------------------
 
@@ -86,7 +88,7 @@ app_license = "mit"
 # ------------
 
 # before_install = "frappe_vimeo.install.before_install"
-# after_install = "frappe_vimeo.install.after_install"
+after_install = "frappe_vimeo.install.after_install"
 
 # Uninstallation
 # ------------
@@ -149,23 +151,14 @@ app_license = "mit"
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"frappe_vimeo.tasks.all"
-# 	],
-# 	"daily": [
-# 		"frappe_vimeo.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"frappe_vimeo.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"frappe_vimeo.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"frappe_vimeo.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"all": [
+		"frappe_vimeo.tasks.sync_dirty_folders",
+		"frappe_vimeo.tasks.sync_pending_folders",
+		"frappe_vimeo.tasks.sync_dirty_videos",
+		"frappe_vimeo.tasks.sync_pending_videos"
+	],
+}
 
 # Testing
 # -------
@@ -258,4 +251,3 @@ require_type_annotated_api_methods = True
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-
