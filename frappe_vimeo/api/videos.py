@@ -8,7 +8,7 @@ import frappe
 import requests
 from frappe import _
 
-from frappe_vimeo.vimeo_client import get_client
+from frappe_vimeo.vimeo_client import VimeoAPIError, get_client
 from frappe_vimeo import tasks
 from frappe_vimeo.api._utils import (
 	_require_manager,
@@ -16,6 +16,35 @@ from frappe_vimeo.api._utils import (
 )
 
 TUS_VERSION = "1.0.0"
+
+
+@frappe.whitelist()
+def get_upload_chunk_size_bytes() -> int:
+	_require_manager()
+	chunk_size_mb = frappe.db.get_single_value("Vimeo Settings", "upload_chunk_size_mb") or 1
+	return max(1, int(chunk_size_mb)) * 1024 * 1024
+
+
+def _create_vimeo_upload_ticket(payload: dict, privacy: str | None = None) -> dict:
+	try:
+		return get_client().post("/me/videos", json=payload)
+	except VimeoAPIError as e:
+		if not privacy or e.status != 400:
+			raise
+
+		retry_payload = {key: value for key, value in payload.items() if key != "privacy"}
+		frappe.log_error(
+			message=frappe.as_json(
+				{
+					"privacy": privacy,
+					"payload": payload,
+					"vimeo_response": e.body or e.message,
+				},
+				indent=2,
+			),
+			title="Vimeo upload ticket privacy rejected",
+		)
+		return get_client().post("/me/videos", json=retry_payload)
 
 
 def _clear_stored_upload_ticket(doc: frappe.model.document.Document) -> None:
@@ -74,8 +103,6 @@ def get_vimeo_upload_ticket(name: str, video_title: str, size: int, description:
 	if resumable_ticket:
 		return resumable_ticket
 
-	client = get_client()
-	
 	payload = {
 		"upload": {
 			"approach": "tus",
@@ -87,7 +114,20 @@ def get_vimeo_upload_ticket(name: str, video_title: str, size: int, description:
 	if privacy:
 		payload["privacy"] = {"view": privacy}
 		
-	res = client.post("/me/videos", json=payload)
+	try:
+		res = _create_vimeo_upload_ticket(payload, privacy=privacy)
+	except VimeoAPIError as e:
+		frappe.log_error(
+			message=frappe.as_json(
+				{
+					"payload": payload,
+					"vimeo_response": e.body or e.message,
+				},
+				indent=2,
+			),
+			title=f"Vimeo upload ticket failed for {name}",
+		)
+		frappe.throw(_("Vimeo rejected the upload request: {0}").format(e.message))
 	
 	upload = res.get("upload") or {}
 	upload_link = upload.get("upload_link")
@@ -184,9 +224,48 @@ def update_video_record(
 
 
 @frappe.whitelist()
+def upload_video_thumbnail(name: str) -> dict:
+	_require_manager()
+	if not name:
+		frappe.throw(_("name is required"))
+
+	uploaded_file = frappe.request.files.get("file")
+	if not uploaded_file:
+		frappe.throw(_("Thumbnail file is required"))
+	if uploaded_file.mimetype and not uploaded_file.mimetype.startswith("image/"):
+		frappe.throw(_("Thumbnail must be an image file"))
+
+	doc = frappe.get_doc("Vimeo Video", name)
+	file_doc = frappe.get_doc(
+		{
+			"doctype": "File",
+			"file_name": uploaded_file.filename,
+			"attached_to_doctype": "Vimeo Video",
+			"attached_to_name": name,
+			"attached_to_field": "thumbnail_image",
+			"is_private": 0,
+			"content": uploaded_file.stream.read(),
+		}
+	)
+	file_doc.insert(ignore_permissions=True)
+
+	doc.thumbnail_image = file_doc.file_url
+	doc.save()
+	frappe.db.commit()
+	return _serialize_video_doc(doc)
+
+
+@frappe.whitelist()
 def pull_videos_from_vimeo() -> dict:
 	"""Kick off a background pull that imports any remote videos missing locally."""
 	_require_manager()
+
+	from frappe_vimeo.frappe_vimeo.doctype.vimeo_settings.vimeo_settings import get_settings
+	get_settings().get_access_token()
+
+	if not frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_id"):
+		frappe.throw(_("Configure App Folder Name in Vimeo Settings before pulling."))
+
 	frappe.enqueue(
 		"frappe_vimeo.tasks.pull_videos_from_vimeo",
 		queue="long",

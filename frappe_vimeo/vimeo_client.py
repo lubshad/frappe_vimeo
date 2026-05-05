@@ -265,7 +265,10 @@ class VimeoClient:
 			payload["name"] = name
 		if set_parent_folder_uri or parent_folder_uri is not None:
 			payload["parent_folder_uri"] = parent_folder_uri
-		return self.patch(f"/me/folders/{folder_id}", json=payload)
+		try:
+			return self.patch(f"/me/projects/{folder_id}", json=payload)
+		except VimeoAPIError:
+			return self.patch(f"/me/folders/{folder_id}", json=payload)
 
 	def delete_folder(self, folder_id: str, delete_remote_contents: bool = False) -> dict:
 		params = {"should_delete_clips": "true"} if delete_remote_contents else None

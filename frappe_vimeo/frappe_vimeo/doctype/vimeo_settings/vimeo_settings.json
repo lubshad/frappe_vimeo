@@ -4,6 +4,10 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "app_section",
+  "app_folder_name",
+  "app_folder_vimeo_id",
+  "app_folder_vimeo_uri",
   "credentials_section",
   "access_token",
   "default_privacy",
@@ -15,6 +19,29 @@
   "last_tested_on"
  ],
  "fields": [
+  {
+   "fieldname": "app_section",
+   "fieldtype": "Section Break",
+   "label": "App"
+  },
+  {
+   "description": "A top-level folder with this name will be created on Vimeo. Locked after first save.",
+   "fieldname": "app_folder_name",
+   "fieldtype": "Data",
+   "label": "App Folder Name"
+  },
+  {
+   "fieldname": "app_folder_vimeo_id",
+   "fieldtype": "Data",
+   "label": "App Folder Vimeo ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "app_folder_vimeo_uri",
+   "fieldtype": "Data",
+   "label": "App Folder Vimeo URI",
+   "read_only": 1
+  },
   {
    "fieldname": "credentials_section",
    "fieldtype": "Section Break",
@@ -42,7 +69,7 @@
    "label": "Default Embed Domain"
   },
   {
-   "default": "1",
+   "default": "8",
    "description": "Chunk size in MB for browser uploads to Frappe before forwarding to Vimeo.",
    "fieldname": "upload_chunk_size_mb",
    "fieldtype": "Int",
@@ -74,7 +101,7 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-04-16 10:30:00.000000",
+ "modified": "2026-04-24 19:55:50.000000",
  "modified_by": "Administrator",
  "module": "Frappe Vimeo",
  "name": "Vimeo Settings",

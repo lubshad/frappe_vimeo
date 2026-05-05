@@ -22,6 +22,7 @@ class VimeoFolder(NestedSet):
 
 	def validate(self) -> None:
 		if getattr(self.flags, "from_remote_sync", False):
+			self._set_is_group_from_children()
 			return
 
 		_require_manager()
@@ -30,6 +31,7 @@ class VimeoFolder(NestedSet):
 			frappe.throw(_("Folder Name is required"))
 		self._validate_depth()
 		self._validate_video_memberships()
+		self._set_is_group_from_children()
 
 	def on_update(self) -> None:
 		NestedSet.on_update(self)
@@ -39,6 +41,7 @@ class VimeoFolder(NestedSet):
 
 	def on_trash(self) -> None:
 		_require_manager()
+		self._validate_not_configured_app_folder()
 		NestedSet.on_trash(self, allow_root_deletion=True)
 		if not self.vimeo_id or getattr(self.flags, "ignore_vimeo_delete", False):
 			return
@@ -52,6 +55,23 @@ class VimeoFolder(NestedSet):
 			enqueue_after_commit=True,
 		)
 
+	def _validate_not_configured_app_folder(self) -> None:
+		app_folder_name = frappe.db.get_single_value("Vimeo Settings", "app_folder_name")
+		app_folder_vimeo_id = frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_id")
+		app_folder_vimeo_uri = frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_uri")
+		is_configured_folder = any(
+			(
+				app_folder_name and self.name == app_folder_name,
+				app_folder_name and self.folder_name == app_folder_name,
+				app_folder_vimeo_id and self.vimeo_id == app_folder_vimeo_id,
+				app_folder_vimeo_uri and self.vimeo_uri == app_folder_vimeo_uri,
+			)
+		)
+		if is_configured_folder:
+			frappe.throw(
+				_("Cannot delete the Vimeo parent folder configured in Vimeo Settings.")
+			)
+
 	def _validate_depth(self) -> None:
 		depth = 1
 		parent_name = self.parent_vimeo_folder
@@ -64,6 +84,12 @@ class VimeoFolder(NestedSet):
 			if depth > MAX_FOLDER_DEPTH:
 				frappe.throw(_("Vimeo folders can only be nested up to 10 levels"))
 			parent_name = frappe.db.get_value("Vimeo Folder", parent_name, "parent_vimeo_folder")
+
+	def _set_is_group_from_children(self) -> None:
+		if not self.name:
+			return
+		if frappe.db.exists("Vimeo Folder", {"parent_vimeo_folder": self.name}):
+			self.is_group = 1
 
 	def _validate_video_memberships(self) -> None:
 		seen_videos: set[str] = set()
@@ -104,6 +130,7 @@ class VimeoFolder(NestedSet):
 				timeout=900,
 				enqueue_after_commit=True,
 			)
+
 			if previous and self.vimeo_id and memberships_changed:
 				added, removed = _get_membership_deltas(previous, self)
 				if added or removed:

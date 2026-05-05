@@ -40,6 +40,43 @@ SYNC_POLL_INTERVAL_SECONDS = 60
 SYNC_MAX_POLLS = 5  # Total 5 minutes (5 * 60 seconds)
 
 
+def _fetch_all_remote_folders(client) -> list[dict]:
+	"""Fetch every folder from /me/folders, paginated."""
+	remotes: list[dict] = []
+	page = 1
+	while page <= PULL_MAX_PAGES:
+		raw = client.get(
+			"/me/folders",
+			params={"page": page, "per_page": PULL_PAGE_SIZE},
+		)
+		for item in raw.get("data") or []:
+			normalized = _normalize_folder(item)
+			if normalized.get("id"):
+				remotes.append(normalized)
+		if not (raw.get("paging") or {}).get("next"):
+			break
+		page += 1
+	return remotes
+
+
+def _app_folder_subtree_ids(remotes: list[dict], app_folder_id: str) -> set[str]:
+	"""Return app folder id + every descendant id, walking parent_uri client-side."""
+	by_id = {r["id"]: r for r in remotes if r.get("id")}
+	allowed: set[str] = {app_folder_id}
+	changed = True
+	while changed:
+		changed = False
+		for rid, remote in by_id.items():
+			if rid in allowed:
+				continue
+			parent_uri = remote.get("parent_uri") or ""
+			parent_id = parent_uri.rsplit("/", 1)[-1] if parent_uri else None
+			if parent_id and parent_id in allowed:
+				allowed.add(rid)
+				changed = True
+	return allowed
+
+
 def _mark_last_synced(doc) -> None:
 	last_synced_on = frappe.utils.now_datetime()
 	doc.db_set("last_synced_on", last_synced_on, update_modified=False)
@@ -273,6 +310,7 @@ def sync_vimeo_folder(folder_name: str) -> None:
 	_mark_folder_sync_state(folder_name, "syncing", "")
 	doc = frappe.get_doc("Vimeo Folder", folder_name)
 	parent_folder_uri = _folder_parent_uri(doc)
+	desired_folder_name = doc.folder_name
 
 	try:
 		if doc.vimeo_id:
@@ -295,7 +333,15 @@ def sync_vimeo_folder(folder_name: str) -> None:
 		return
 
 	doc = frappe.get_doc("Vimeo Folder", folder_name)
-	_apply_folder_to_doc(doc, _normalize_folder(raw))
+	normalized_folder = _normalize_folder(raw)
+	if doc.vimeo_id:
+		# Vimeo can return stale or partial folder data immediately after a
+		# rename. Keep the local name that triggered this sync instead of
+		# reverting the UI back to the previous remote value.
+		normalized_folder["name"] = desired_folder_name
+	_apply_folder_to_doc(doc, normalized_folder)
+	if frappe.db.exists("Vimeo Folder", {"parent_vimeo_folder": doc.name}):
+		doc.is_group = 1
 	doc.flags.from_remote_sync = True
 	doc.flags.ignore_version = True
 	doc.save(ignore_permissions=True)
@@ -368,11 +414,33 @@ def reconcile_folder_memberships(
 
 
 def pull_videos_from_vimeo() -> dict:
-	"""Import any videos from the connected Vimeo account that aren't tracked locally."""
+	"""Import any videos from the connected Vimeo account that aren't tracked locally.
+
+	Scoped to the configured app folder subtree — videos outside it are ignored.
+	"""
 	created = 0
 	skipped = 0
 	errors = 0
+
+	app_folder_id = frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_id")
+	if not app_folder_id:
+		frappe.log_error(
+			message="app_folder_vimeo_id is not set on Vimeo Settings",
+			title="Vimeo video pull skipped",
+		)
+		return {"created": 0, "skipped": 0, "errors": 1}
+
 	client = get_client()
+	try:
+		remotes = _fetch_all_remote_folders(client)
+	except VimeoAPIError as e:
+		frappe.log_error(
+			message=str(e.body or e.message),
+			title="Vimeo video pull failed (folder fetch)",
+		)
+		return {"created": 0, "skipped": 0, "errors": 1}
+
+	allowed_folder_ids = _app_folder_subtree_ids(remotes, app_folder_id)
 
 	page = 1
 	while page <= PULL_MAX_PAGES:
@@ -390,6 +458,11 @@ def pull_videos_from_vimeo() -> dict:
 
 		items = raw.get("data") or []
 		for item in items:
+			parent = item.get("parent_folder") or {}
+			parent_uri = parent.get("uri") or ""
+			parent_id = parent_uri.rsplit("/", 1)[-1] if parent_uri else None
+			if not parent_id or parent_id not in allowed_folder_ids:
+				continue
 			normalized = _normalize_video(item)
 			if not normalized.get("id"):
 				continue
@@ -419,33 +492,30 @@ def pull_videos_from_vimeo() -> dict:
 
 
 def pull_folders_from_vimeo() -> dict:
-	"""Import folders from the connected Vimeo account in parent-first order."""
+	"""Import folders from the connected Vimeo account in parent-first order.
+
+	Scoped to the configured app folder subtree — folders outside it are ignored.
+	"""
+	app_folder_id = frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_id")
+	if not app_folder_id:
+		frappe.log_error(
+			message="app_folder_vimeo_id is not set on Vimeo Settings",
+			title="Vimeo folder pull skipped",
+		)
+		return {"created": 0, "skipped": 0, "errors": 1}
+
 	client = get_client()
+	try:
+		remotes = _fetch_all_remote_folders(client)
+	except VimeoAPIError as e:
+		frappe.log_error(
+			message=str(e.body or e.message),
+			title="Vimeo folder pull failed",
+		)
+		return {"created": 0, "skipped": 0, "errors": 1}
 
-	remotes: list[dict] = []
-	page = 1
-	while page <= PULL_MAX_PAGES:
-		try:
-			raw = client.get(
-				"/me/folders",
-				params={"page": page, "per_page": PULL_PAGE_SIZE},
-			)
-		except VimeoAPIError as e:
-			frappe.log_error(
-				message=str(e.body or e.message),
-				title="Vimeo folder pull failed",
-			)
-			return {"created": 0, "skipped": 0, "errors": 1}
-
-		items = raw.get("data") or []
-		for item in items:
-			normalized = _normalize_folder(item)
-			if normalized.get("id"):
-				remotes.append(normalized)
-
-		if not (raw.get("paging") or {}).get("next"):
-			break
-		page += 1
+	allowed_folder_ids = _app_folder_subtree_ids(remotes, app_folder_id)
+	remotes = [r for r in remotes if r["id"] in allowed_folder_ids]
 
 	created = 0
 	skipped = 0
@@ -464,33 +534,35 @@ def pull_folders_from_vimeo() -> dict:
 				progress = True
 				continue
 
-			parent_uri = remote.get("parent_uri")
-			parent_name: str | None = None
-			if parent_uri:
-				parent_name = frappe.db.get_value("Vimeo Folder", {"vimeo_uri": parent_uri}, "name")
-				if not parent_name:
-					# Parent not imported yet — defer to the next pass.
-					next_pending.append(remote)
-					continue
+				parent_uri = remote.get("parent_uri")
+				parent_name: str | None = None
+				if parent_uri:
+					parent_name = frappe.db.get_value("Vimeo Folder", {"vimeo_uri": parent_uri}, "name")
+					if not parent_name:
+						# Parent not imported yet — defer to the next pass.
+						next_pending.append(remote)
+						continue
 
-			try:
-				doc = frappe.new_doc("Vimeo Folder")
-				doc.flags.from_remote_sync = True
-				doc.flags.ignore_version = True
-				_apply_folder_to_doc(doc, remote)
-				if not doc.folder_name:
-					doc.folder_name = remote["id"]
-				doc.parent_vimeo_folder = parent_name
-				doc.insert(ignore_permissions=True)
-				created += 1
-				progress = True
-			except Exception as exc:
-				errors += 1
-				progress = True
-				frappe.log_error(
-					message=f"{type(exc).__name__}: {exc}",
-					title=f"Vimeo folder pull insert failed for {remote.get('id')}",
-				)
+				try:
+					doc = frappe.new_doc("Vimeo Folder")
+					doc.flags.from_remote_sync = True
+					doc.flags.ignore_version = True
+					_apply_folder_to_doc(doc, remote)
+					if not doc.folder_name:
+						doc.folder_name = remote["id"]
+					doc.parent_vimeo_folder = parent_name
+					if any(r.get("parent_uri") == remote.get("uri") for r in remotes):
+						doc.is_group = 1
+					doc.insert(ignore_permissions=True)
+					created += 1
+					progress = True
+				except Exception as exc:
+					errors += 1
+					progress = True
+					frappe.log_error(
+						message=f"{type(exc).__name__}: {exc}",
+						title=f"Vimeo folder pull insert failed for {remote.get('id')}",
+					)
 		pending = next_pending
 		if not progress:
 			break

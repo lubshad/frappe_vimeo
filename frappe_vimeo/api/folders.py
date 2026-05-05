@@ -18,6 +18,19 @@ from frappe_vimeo.api._utils import (
 
 
 @frappe.whitelist()
+def get_app_folder_name() -> str | None:
+	_require_manager()
+	app_folder_title = frappe.db.get_single_value("Vimeo Settings", "app_folder_name")
+	if not app_folder_title:
+		return None
+	return frappe.db.get_value(
+		"Vimeo Folder",
+		{"folder_name": app_folder_title, "parent_vimeo_folder": ("in", ["", None])},
+		"name"
+	)
+
+
+@frappe.whitelist()
 def create_folder_record(
 	folder_name: str,
 	parent_folder_name: str | None = None,
@@ -29,6 +42,17 @@ def create_folder_record(
 
 	doc = frappe.new_doc("Vimeo Folder")
 	doc.folder_name = folder_name
+	
+	if not parent_folder_name:
+		# If no parent is specified, we use the App Folder from settings
+		app_folder_title = frappe.db.get_single_value("Vimeo Settings", "app_folder_name")
+		if app_folder_title:
+			parent_folder_name = frappe.db.get_value(
+				"Vimeo Folder",
+				{"folder_name": app_folder_title, "parent_vimeo_folder": ("in", ["", None])},
+				"name"
+			)
+			
 	doc.parent_vimeo_folder = parent_folder_name
 	_rebuild_folder_videos(doc, video_names)
 	doc.insert()
@@ -50,8 +74,10 @@ def update_folder_record(
 		frappe.throw(_("At least one field must be provided"))
 
 	doc = frappe.get_doc("Vimeo Folder", name)
-	if folder_name is not None:
-		doc.folder_name = folder_name
+	if folder_name is not None and folder_name != doc.folder_name:
+		new_name = frappe.rename_doc("Vimeo Folder", name, folder_name)
+		doc = frappe.get_doc("Vimeo Folder", new_name)
+
 	if parent_folder_name is not None:
 		doc.parent_vimeo_folder = parent_folder_name
 	if video_names is not None:
@@ -72,21 +98,36 @@ def get_folder_record(name: str, include_videos: int = 0) -> dict:
 
 @frappe.whitelist()
 def list_folder_records(
-	parent_folder_name: str | None = None,
+	parent_name: str | None = None,
 	include_children: int = 0,
 	include_videos: int = 0,
 ) -> list[dict]:
 	_require_manager()
 
-	if parent_folder_name and cint(include_children):
-		names = _get_descendant_folder_names(parent_folder_name)
-		if parent_folder_name not in names:
-			names.insert(0, parent_folder_name)
+	if parent_name and cint(include_children):
+		names = _get_descendant_folder_names(parent_name)
+		if parent_name not in names:
+			names.insert(0, parent_name)
 		filters = {"name": ("in", names)}
-	elif parent_folder_name:
-		filters = {"parent_vimeo_folder": parent_folder_name}
+	elif parent_name:
+		filters = {"parent_vimeo_folder": parent_name}
 	else:
-		filters = {}
+		# If no parent is specified, we only show folders under the App Folder Name
+		app_folder_title = frappe.db.get_single_value("Vimeo Settings", "app_folder_name")
+		if app_folder_title:
+			# Find the local record for the app folder
+			app_folder_id = frappe.db.get_value(
+				"Vimeo Folder",
+				{"folder_name": app_folder_title, "parent_vimeo_folder": ("in", ["", None])},
+				"name"
+			)
+			if app_folder_id:
+				filters = {"parent_vimeo_folder": app_folder_id}
+			else:
+				# App folder not yet synced or doesn't exist locally
+				return []
+		else:
+			filters = {"parent_vimeo_folder": ("in", ["", None])}
 
 	names = frappe.get_all(
 		"Vimeo Folder",
@@ -96,10 +137,10 @@ def list_folder_records(
 	)
 	return [
 		_serialize_folder_doc(
-			frappe.get_doc("Vimeo Folder", folder_name),
+			frappe.get_doc("Vimeo Folder", folder_id),
 			include_videos=bool(cint(include_videos)),
 		)
-		for folder_name in names
+		for folder_id in names
 	]
 
 
@@ -118,6 +159,13 @@ def sync_folder_record(name: str) -> dict:
 def pull_folders_from_vimeo() -> dict:
 	"""Kick off a background pull that imports any remote folders missing locally."""
 	_require_manager()
+
+	from frappe_vimeo.frappe_vimeo.doctype.vimeo_settings.vimeo_settings import get_settings
+	get_settings().get_access_token()
+
+	if not frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_id"):
+		frappe.throw(_("Configure App Folder Name in Vimeo Settings before pulling."))
+
 	frappe.enqueue(
 		"frappe_vimeo.tasks.pull_folders_from_vimeo",
 		queue="long",
