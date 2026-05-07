@@ -12,6 +12,7 @@ from frappe_vimeo.api._utils import (
 	_get_folder_video_names,
 	_get_membership_deltas,
 	_require_manager,
+	_require_vimeo_configured,
 )
 
 MAX_FOLDER_DEPTH = 10
@@ -29,6 +30,7 @@ class VimeoFolder(NestedSet):
 		self.folder_name = (self.folder_name or "").strip()
 		if not self.folder_name:
 			frappe.throw(_("Folder Name is required"))
+		_require_vimeo_configured()
 		self._validate_depth()
 		self._validate_video_memberships()
 		self._set_is_group_from_children()

@@ -13,6 +13,7 @@ from frappe_vimeo.api._utils import (
 	_queue_folder_sync,
 	_rebuild_folder_videos,
 	_require_manager,
+	_require_vimeo_configured,
 	_serialize_folder_doc,
 )
 
@@ -39,6 +40,7 @@ def create_folder_record(
 	_require_manager()
 	if not folder_name:
 		frappe.throw(_("folder_name is required"))
+	_require_vimeo_configured()
 
 	doc = frappe.new_doc("Vimeo Folder")
 	doc.folder_name = folder_name

@@ -12,6 +12,9 @@ from frappe import _
 from frappe.utils import cint
 
 MANAGER_ROLES = ("System Manager", "Vimeo Manager")
+VIMEO_NOT_CONFIGURED_MESSAGE = (
+	"Vimeo is not configured. Configure and test Vimeo Settings before creating content folders."
+)
 VIDEO_FIELD_MAP = {
 	"vimeo_id": "id",
 	"vimeo_uri": "uri",
@@ -54,6 +57,20 @@ def _require_manager() -> None:
 			_("You are not permitted to access Vimeo APIs"),
 			frappe.PermissionError,
 		)
+
+
+def _require_vimeo_configured() -> None:
+	"""Raise unless Vimeo Settings has the local fields needed for folder sync."""
+	settings = frappe.get_cached_doc("Vimeo Settings", "Vimeo Settings")
+	access_token = settings.get_password("access_token", raise_exception=False)
+	required_values = (
+		access_token,
+		getattr(settings, "app_folder_name", None),
+		getattr(settings, "app_folder_vimeo_id", None),
+		getattr(settings, "app_folder_vimeo_uri", None),
+	)
+	if not all(str(value or "").strip() for value in required_values):
+		frappe.throw(_(VIMEO_NOT_CONFIGURED_MESSAGE))
 
 
 def _resolve_file_path(file_url: str) -> str:

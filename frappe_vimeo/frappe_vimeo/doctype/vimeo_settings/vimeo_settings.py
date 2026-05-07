@@ -110,6 +110,7 @@ class VimeoSettings(Document):
 			doc.vimeo_id = self.app_folder_vimeo_id
 			doc.vimeo_uri = self.app_folder_vimeo_uri
 			doc.sync_status = "synced"
+			doc.flags.from_remote_sync = True
 			doc.insert(ignore_permissions=True)
 		else:
 			frappe.db.set_value(
