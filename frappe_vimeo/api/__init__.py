@@ -21,6 +21,7 @@ from frappe_vimeo.api.videos import (
 from frappe_vimeo.api.folders import (
 	create_folder_record,
 	delete_folder_record,
+	get_app_folder_name,
 	get_folder_contents,
 	get_folder_record,
 	list_folder_records,
@@ -35,6 +36,7 @@ __all__ = [
 	"delete_folder_record",
 	"delete_video_record",
 	"finalize_vimeo_upload",
+	"get_app_folder_name",
 	"get_folder_contents",
 	"get_folder_record",
 	"get_upload_chunk_size_bytes",

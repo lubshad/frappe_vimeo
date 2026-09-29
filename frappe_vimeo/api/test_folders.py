@@ -2,8 +2,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from frappe_vimeo import api
 from frappe_vimeo.api._utils import _add_folder_item_counts
-from frappe_vimeo.api.folders import get_folder_contents, list_folder_records
+from frappe_vimeo.api.folders import get_app_folder_name, get_folder_contents, list_folder_records
 
 
 def _folder(name: str, parent: str | None = None) -> SimpleNamespace:
@@ -23,6 +24,20 @@ def _folder(name: str, parent: str | None = None) -> SimpleNamespace:
 
 
 class TestGetFolderContents(unittest.TestCase):
+	@patch("frappe_vimeo.api.folders._require_manager")
+	@patch("frappe_vimeo.api.folders.frappe")
+	def test_app_folder_name_is_exposed_on_public_api(self, mock_frappe, _manager) -> None:
+		mock_frappe.db.get_single_value.return_value = "MCAL"
+		mock_frappe.db.get_value.return_value = "app-folder"
+
+		self.assertIs(api.get_app_folder_name, get_app_folder_name)
+		self.assertEqual(api.get_app_folder_name(), "app-folder")
+		mock_frappe.db.get_value.assert_called_once_with(
+			"Vimeo Folder",
+			{"folder_name": "MCAL", "parent_vimeo_folder": ("in", ["", None])},
+			"name",
+		)
+
 	@patch("frappe_vimeo.api.folders._require_manager")
 	@patch("frappe_vimeo.api.folders.frappe")
 	@patch("frappe_vimeo.api._utils.frappe")
