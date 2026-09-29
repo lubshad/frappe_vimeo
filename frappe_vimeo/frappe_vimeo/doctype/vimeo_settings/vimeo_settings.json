@@ -15,8 +15,13 @@
   "upload_chunk_size_mb",
   "connection_section",
   "api_base_url",
-  "connection_status",
-  "last_tested_on"
+   "connection_status",
+   "last_tested_on",
+   "pull_section",
+   "pull_status",
+   "pull_error",
+   "last_pull_on",
+   "last_pull_summary"
  ],
  "fields": [
   {
@@ -25,7 +30,7 @@
    "label": "App"
   },
   {
-   "description": "A top-level folder with this name will be created on Vimeo. Locked after first save.",
+    "description": "A top-level folder with this name will be created on Vimeo when you test the connection. Locked after creation.",
    "fieldname": "app_folder_name",
    "fieldtype": "Data",
    "label": "App Folder Name"
@@ -93,10 +98,40 @@
    "read_only": 1
   },
   {
-   "fieldname": "last_tested_on",
-   "fieldtype": "Datetime",
-   "label": "Last Tested On",
-   "read_only": 1
+    "fieldname": "last_tested_on",
+    "fieldtype": "Datetime",
+    "label": "Last Tested On",
+    "read_only": 1
+  },
+  {
+    "fieldname": "pull_section",
+    "fieldtype": "Section Break",
+    "label": "Import from Vimeo"
+  },
+  {
+    "fieldname": "pull_status",
+    "fieldtype": "Select",
+    "label": "Import Status",
+    "options": "\nqueued\nsyncing\ncomplete\nfailed",
+    "read_only": 1
+  },
+  {
+    "fieldname": "pull_error",
+    "fieldtype": "Small Text",
+    "label": "Import Error",
+    "read_only": 1
+  },
+  {
+    "fieldname": "last_pull_on",
+    "fieldtype": "Datetime",
+    "label": "Last Import On",
+    "read_only": 1
+  },
+  {
+    "fieldname": "last_pull_summary",
+    "fieldtype": "Small Text",
+    "label": "Last Import Summary",
+    "read_only": 1
   }
  ],
  "issingle": 1,

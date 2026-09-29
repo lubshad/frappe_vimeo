@@ -25,56 +25,75 @@ from frappe_vimeo.api._utils import (
 	_video_needs_metadata_sync,
 	_video_needs_status_sync,
 )
-from frappe_vimeo.vimeo_client import VimeoAPIError, get_client
+from frappe_vimeo.vimeo_client import VimeoAPIError, VimeoClient, get_client
 
 NORMALIZED_FIELDS = (
 	"uri,name,description,duration,created_time,modified_time,"
 	"privacy.view,link,player_embed_url,pictures.sizes,"
 	"download,status,transcode.status,width,height,language,license,tags,embed.html"
 )
-FOLDER_FIELDS = "uri,name,parent_folder.uri"
 PULL_PAGE_SIZE = 100
 PULL_MAX_PAGES = 200
+PULL_MAX_FOLDERS = 2000
 FOLDER_TOPOLOGICAL_MAX_PASSES = 20
 SYNC_POLL_INTERVAL_SECONDS = 60
 SYNC_MAX_POLLS = 5  # Total 5 minutes (5 * 60 seconds)
 
 
-def _fetch_all_remote_folders(client) -> list[dict]:
-	"""Fetch every folder from /me/folders, paginated."""
-	remotes: list[dict] = []
-	page = 1
-	while page <= PULL_MAX_PAGES:
-		raw = client.get(
-			"/me/folders",
-			params={"page": page, "per_page": PULL_PAGE_SIZE},
-		)
-		for item in raw.get("data") or []:
-			normalized = _normalize_folder(item)
-			if normalized.get("id"):
-				remotes.append(normalized)
-		if not (raw.get("paging") or {}).get("next"):
-			break
-		page += 1
-	return remotes
-
-
-def _app_folder_subtree_ids(remotes: list[dict], app_folder_id: str) -> set[str]:
-	"""Return app folder id + every descendant id, walking parent_uri client-side."""
-	by_id = {r["id"]: r for r in remotes if r.get("id")}
-	allowed: set[str] = {app_folder_id}
-	changed = True
-	while changed:
-		changed = False
-		for rid, remote in by_id.items():
-			if rid in allowed:
+def _fetch_folder_items(client: VimeoClient, folder_id: str) -> list[dict]:
+	"""Fetch a complete folder listing, including subfolders and videos."""
+	items: list[dict] = []
+	for page in range(1, PULL_MAX_PAGES + 1):
+		raw = client.list_folder_items(folder_id, params={"page": page, "per_page": PULL_PAGE_SIZE})
+		for entry in raw.get("data") or []:
+			if not isinstance(entry, dict):
 				continue
-			parent_uri = remote.get("parent_uri") or ""
-			parent_id = parent_uri.rsplit("/", 1)[-1] if parent_uri else None
-			if parent_id and parent_id in allowed:
-				allowed.add(rid)
-				changed = True
-	return allowed
+			kind = entry.get("type")
+			if kind in ("folder", "video") and kind in entry:
+				item = entry[kind]
+				if not isinstance(item, dict) or not item.get("uri"):
+					raise VimeoAPIError(0, f"Vimeo returned an invalid {kind} item in folder {folder_id}")
+				items.append(item)
+			elif entry.get("uri"):
+				items.append(entry)
+		if not (raw.get("paging") or {}).get("next"):
+			return items
+	raise VimeoAPIError(0, f"Vimeo item listing exceeded the page limit for folder {folder_id}")
+
+
+def _fetch_app_subtree(client: VimeoClient) -> tuple[list[dict], dict[str, list[dict]]]:
+	"""Walk from the configured root; /me/folders need not contain descendants."""
+	root_id = frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_id")
+	root_uri = frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_uri")
+	root_name = frappe.db.get_single_value("Vimeo Settings", "app_folder_name")
+	if not root_id or not root_uri:
+		raise VimeoAPIError(0, "Configure and test the Vimeo app folder before importing")
+	root = {"id": root_id, "uri": root_uri, "name": root_name or root_id, "parent_uri": None}
+	queue = [root]
+	folders: list[dict] = []
+	videos: dict[str, list[dict]] = {}
+	seen: set[str] = set()
+	while queue:
+		folder = queue.pop(0)
+		folder_id = folder["id"]
+		if folder_id in seen:
+			continue
+		if len(seen) >= PULL_MAX_FOLDERS:
+			raise VimeoAPIError(0, "Vimeo folder import exceeded the folder limit")
+		seen.add(folder_id)
+		folders.append(folder)
+		items = _fetch_folder_items(client, folder_id)
+		videos[folder_id] = []
+		for item in items:
+			uri = item.get("uri") or ""
+			if uri.startswith("/videos/"):
+				videos[folder_id].append(item)
+			elif "/projects/" in uri or "/folders/" in uri:
+				child = _normalize_folder(item)
+				if child.get("id") and child["id"] not in seen:
+					child["parent_uri"] = folder["uri"]
+					queue.append(child)
+	return folders, videos
 
 
 def _mark_last_synced(doc) -> None:
@@ -413,11 +432,8 @@ def reconcile_folder_memberships(
 	frappe.db.commit()
 
 
-def pull_videos_from_vimeo() -> dict:
-	"""Import any videos from the connected Vimeo account that aren't tracked locally.
-
-	Scoped to the configured app folder subtree — videos outside it are ignored.
-	"""
+def pull_videos_from_vimeo(snapshot: tuple[list[dict], dict[str, list[dict]]] | None = None) -> dict:
+	"""Import videos and memberships in the configured app folder subtree."""
 	created = 0
 	skipped = 0
 	errors = 0
@@ -430,68 +446,95 @@ def pull_videos_from_vimeo() -> dict:
 		)
 		return {"created": 0, "skipped": 0, "errors": 1}
 
-	client = get_client()
 	try:
-		remotes = _fetch_all_remote_folders(client)
+		remotes, remote_videos = snapshot if snapshot is not None else _fetch_app_subtree(get_client())
 	except VimeoAPIError as e:
 		frappe.log_error(
-			message=str(e.body or e.message),
+			message=e.message,
 			title="Vimeo video pull failed (folder fetch)",
 		)
 		return {"created": 0, "skipped": 0, "errors": 1}
 
-	allowed_folder_ids = _app_folder_subtree_ids(remotes, app_folder_id)
+	allowed_folder_ids = {remote["id"] for remote in remotes}
 
-	page = 1
-	while page <= PULL_MAX_PAGES:
-		try:
-			raw = client.get(
-				"/me/videos",
-				params={"page": page, "per_page": PULL_PAGE_SIZE},
-			)
-		except VimeoAPIError as e:
-			frappe.log_error(
-				message=str(e.body or e.message),
-				title="Vimeo video pull failed",
-			)
-			return {"created": created, "skipped": skipped, "errors": errors + 1}
+	# Folder item listings are authoritative for membership; /me/videos does
+	# not consistently include a parent_folder field.
+	folder_names = {
+		row.vimeo_id: row.name
+		for row in frappe.get_all(
+			"Vimeo Folder",
+			filters={"vimeo_id": ("in", list(allowed_folder_ids))},
+			fields=["name", "vimeo_id"],
+		)
+	}
+	if len(folder_names) != len(allowed_folder_ids):
+		frappe.log_error("Import folders before importing their videos", "Vimeo video pull failed")
+		return {"created": 0, "skipped": 0, "errors": 1}
 
-		items = raw.get("data") or []
+	memberships: dict[str, set[str]] = {}
+	video_names: dict[str, str] = {}
+	for folder_id, folder_name in folder_names.items():
+		items = remote_videos[folder_id]
+		memberships[folder_name] = set()
 		for item in items:
-			parent = item.get("parent_folder") or {}
-			parent_uri = parent.get("uri") or ""
-			parent_id = parent_uri.rsplit("/", 1)[-1] if parent_uri else None
-			if not parent_id or parent_id not in allowed_folder_ids:
-				continue
 			normalized = _normalize_video(item)
-			if not normalized.get("id"):
+			video_id = normalized.get("id")
+			if not video_id:
 				continue
-			if frappe.db.exists("Vimeo Video", {"vimeo_id": normalized["id"]}):
-				skipped += 1
-				continue
-			try:
-				doc = frappe.new_doc("Vimeo Video")
-				doc.flags.from_remote_sync = True
-				doc.flags.ignore_version = True
-				_apply_video_to_doc(doc, normalized)
-				doc.insert(ignore_permissions=True)
-				created += 1
-			except Exception as exc:
-				errors += 1
-				frappe.log_error(
-					message=f"{type(exc).__name__}: {exc}",
-					title=f"Vimeo video pull insert failed for {normalized.get('id')}",
-				)
+			if video_id not in video_names:
+				video_name = frappe.db.get_value("Vimeo Video", {"vimeo_id": video_id}, "name")
+				if video_name:
+					skipped += 1
+					video = frappe.get_doc("Vimeo Video", video_name)
+					if (normalized.get("name") and video.video_title != normalized["name"]) or (
+						normalized.get("privacy") and video.privacy != normalized["privacy"]
+					):
+						if normalized.get("name"):
+							video.video_title = normalized["name"]
+						if normalized.get("privacy"):
+							video.privacy = normalized["privacy"]
+						video.last_synced_on = frappe.utils.now_datetime()
+						video.flags.from_remote_sync = True
+						video.flags.ignore_version = True
+						video.save(ignore_permissions=True)
+				else:
+					try:
+						frappe.db.savepoint("vimeo_video_pull_insert")
+						doc = frappe.new_doc("Vimeo Video")
+						doc.flags.from_remote_sync = True
+						doc.flags.ignore_version = True
+						_apply_video_to_doc(doc, normalized)
+						doc.insert(ignore_permissions=True)
+						video_name = doc.name
+						created += 1
+					except Exception as exc:
+						frappe.db.rollback(save_point="vimeo_video_pull_insert")
+						errors += 1
+						frappe.log_error(message=f"{type(exc).__name__}: {exc}", title=f"Vimeo video pull insert failed for {video_id}")
+						continue
+				video_names[video_id] = video_name
+			memberships[folder_name].add(video_names[video_id])
 
-		if not (raw.get("paging") or {}).get("next"):
-			break
-		page += 1
+	# Do not remove local links based on a partial/failed Vimeo listing.
+	if errors:
+		frappe.db.commit()
+		return {"created": created, "skipped": skipped, "errors": errors}
+	for folder_name, names in memberships.items():
+		folder = frappe.get_doc("Vimeo Folder", folder_name)
+		if _get_folder_video_names(folder) == names:
+			continue
+		folder.set("videos", [])
+		for video_name in sorted(names):
+			folder.append("videos", {"video": video_name})
+		folder.flags.from_remote_sync = True
+		folder.flags.ignore_version = True
+		folder.save(ignore_permissions=True)
 
 	frappe.db.commit()
 	return {"created": created, "skipped": skipped, "errors": errors}
 
 
-def pull_folders_from_vimeo() -> dict:
+def pull_folders_from_vimeo(snapshot: tuple[list[dict], dict[str, list[dict]]] | None = None) -> dict:
 	"""Import folders from the connected Vimeo account in parent-first order.
 
 	Scoped to the configured app folder subtree — folders outside it are ignored.
@@ -504,18 +547,14 @@ def pull_folders_from_vimeo() -> dict:
 		)
 		return {"created": 0, "skipped": 0, "errors": 1}
 
-	client = get_client()
 	try:
-		remotes = _fetch_all_remote_folders(client)
+		remotes, _ = snapshot if snapshot is not None else _fetch_app_subtree(get_client())
 	except VimeoAPIError as e:
 		frappe.log_error(
-			message=str(e.body or e.message),
+			message=e.message,
 			title="Vimeo folder pull failed",
 		)
 		return {"created": 0, "skipped": 0, "errors": 1}
-
-	allowed_folder_ids = _app_folder_subtree_ids(remotes, app_folder_id)
-	remotes = [r for r in remotes if r["id"] in allowed_folder_ids]
 
 	created = 0
 	skipped = 0
@@ -534,35 +573,43 @@ def pull_folders_from_vimeo() -> dict:
 				progress = True
 				continue
 
-				parent_uri = remote.get("parent_uri")
-				parent_name: str | None = None
-				if parent_uri:
-					parent_name = frappe.db.get_value("Vimeo Folder", {"vimeo_uri": parent_uri}, "name")
-					if not parent_name:
-						# Parent not imported yet — defer to the next pass.
-						next_pending.append(remote)
-						continue
+			parent_uri = remote.get("parent_uri")
+			parent_name: str | None = None
+			if parent_uri:
+				parent_name = frappe.db.get_value("Vimeo Folder", {"vimeo_uri": parent_uri}, "name")
+				if not parent_name:
+					# Parent not imported yet — defer to the next pass.
+					next_pending.append(remote)
+					continue
 
-				try:
-					doc = frappe.new_doc("Vimeo Folder")
-					doc.flags.from_remote_sync = True
-					doc.flags.ignore_version = True
-					_apply_folder_to_doc(doc, remote)
-					if not doc.folder_name:
-						doc.folder_name = remote["id"]
-					doc.parent_vimeo_folder = parent_name
-					if any(r.get("parent_uri") == remote.get("uri") for r in remotes):
-						doc.is_group = 1
-					doc.insert(ignore_permissions=True)
-					created += 1
-					progress = True
-				except Exception as exc:
-					errors += 1
-					progress = True
-					frappe.log_error(
-						message=f"{type(exc).__name__}: {exc}",
-						title=f"Vimeo folder pull insert failed for {remote.get('id')}",
-					)
+			try:
+				frappe.db.savepoint("vimeo_folder_pull_insert")
+				if parent_name:
+					parent = frappe.get_doc("Vimeo Folder", parent_name)
+					if not parent.is_group:
+						parent.is_group = 1
+						parent.flags.from_remote_sync = True
+						parent.save(ignore_permissions=True)
+				doc = frappe.new_doc("Vimeo Folder")
+				doc.flags.from_remote_sync = True
+				doc.flags.ignore_version = True
+				_apply_folder_to_doc(doc, remote)
+				if not doc.folder_name:
+					doc.folder_name = remote["id"]
+				doc.parent_vimeo_folder = parent_name
+				if any(r.get("parent_uri") == remote.get("uri") for r in remotes):
+					doc.is_group = 1
+				doc.insert(ignore_permissions=True)
+				created += 1
+				progress = True
+			except Exception as exc:
+				frappe.db.rollback(save_point="vimeo_folder_pull_insert")
+				errors += 1
+				progress = True
+				frappe.log_error(
+					message=f"{type(exc).__name__}: {exc}",
+					title=f"Vimeo folder pull insert failed for {remote.get('id')}",
+				)
 		pending = next_pending
 		if not progress:
 			break
@@ -578,6 +625,40 @@ def pull_folders_from_vimeo() -> dict:
 
 	frappe.db.commit()
 	return {"created": created, "skipped": skipped, "errors": errors}
+
+
+def pull_from_vimeo() -> dict:
+	"""Import the configured folder subtree in order, with durable job status."""
+	settings = frappe.get_doc("Vimeo Settings", "Vimeo Settings")
+	settings.db_set("pull_status", "syncing")
+	frappe.db.commit()
+	try:
+		snapshot = _fetch_app_subtree(get_client())
+		folders = pull_folders_from_vimeo(snapshot)
+		if folders["errors"]:
+			raise RuntimeError(f"Folder import reported {folders['errors']} error(s). Check Error Log.")
+		videos = pull_videos_from_vimeo(snapshot)
+		if videos["errors"]:
+			raise RuntimeError(f"Video import reported {videos['errors']} error(s). Check Error Log.")
+		summary = (
+			f"Folders: {folders['created']} added, {folders['skipped']} existing; "
+			f"videos: {videos['created']} added, {videos['skipped']} existing."
+		)
+		settings.db_set("last_pull_summary", summary)
+		settings.db_set("last_pull_on", frappe.utils.now_datetime())
+		settings.db_set("pull_error", "")
+		settings.db_set("pull_status", "complete")
+		frappe.db.commit()
+		return {"folders": folders, "videos": videos}
+	except Exception as exc:
+		frappe.db.rollback()
+		message = str(exc) if isinstance(exc, RuntimeError) else "Vimeo import failed. Check Error Log."
+		settings.db_set("pull_error", message)
+		settings.db_set("pull_status", "failed")
+		frappe.db.commit()
+		if not isinstance(exc, RuntimeError):
+			frappe.log_error(message=type(exc).__name__, title="Vimeo import failed")
+		return {"status": "failed", "error": message}
 
 
 def _upload_video_thumbnail(doc) -> dict:

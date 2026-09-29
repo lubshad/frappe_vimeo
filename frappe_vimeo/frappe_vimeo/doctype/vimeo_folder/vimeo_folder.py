@@ -21,6 +21,12 @@ MAX_FOLDER_DEPTH = 10
 class VimeoFolder(NestedSet):
 	nsm_parent_field = "parent_vimeo_folder"
 
+	def autoname(self) -> None:
+		# Vimeo permits identical names under different parents. Keep the visible
+		# folder_name intact and use the stable remote ID for imported records.
+		if getattr(self.flags, "from_remote_sync", False) and self.vimeo_id:
+			self.name = f"VIMEO-FOLDER-{self.vimeo_id}"
+
 	def validate(self) -> None:
 		if getattr(self.flags, "from_remote_sync", False):
 			self._set_is_group_from_children()

@@ -17,6 +17,11 @@ from frappe_vimeo.api._utils import (
 	_serialize_folder_doc,
 )
 
+FOLDER_LIST_FIELDS = [
+	"name", "folder_name", "parent_vimeo_folder", "vimeo_id", "vimeo_uri",
+	"sync_status", "sync_error", "last_synced_on", "owner", "creation", "modified",
+]
+
 
 @frappe.whitelist()
 def get_app_folder_name() -> str | None:
@@ -99,6 +104,38 @@ def get_folder_record(name: str, include_videos: int = 0) -> dict:
 
 
 @frappe.whitelist()
+def get_folder_contents(name: str) -> dict:
+	"""Return locally synced content for one folder in a single request."""
+	_require_manager()
+	if not name:
+		frappe.throw(_("name is required"))
+
+	doc = frappe.get_doc("Vimeo Folder", name)
+	children = frappe.get_all(
+		"Vimeo Folder",
+		filters={"parent_vimeo_folder": name},
+		fields=FOLDER_LIST_FIELDS,
+		order_by="lft asc",
+	)
+
+	breadcrumb = [_serialize_folder_doc(doc)]
+	parent_name = doc.parent_vimeo_folder
+	seen = {name}
+	while parent_name and parent_name not in seen:
+		seen.add(parent_name)
+		parent = frappe.get_doc("Vimeo Folder", parent_name)
+		breadcrumb.insert(0, _serialize_folder_doc(parent))
+		parent_name = parent.parent_vimeo_folder
+
+	return {
+		"folder": _serialize_folder_doc(doc),
+		"children": [_serialize_folder_doc(child) for child in children],
+		"videos": _serialize_folder_doc(doc, include_videos=True)["videos"],
+		"breadcrumb": breadcrumb,
+	}
+
+
+@frappe.whitelist()
 def list_folder_records(
 	parent_name: str | None = None,
 	include_children: int = 0,
@@ -131,18 +168,19 @@ def list_folder_records(
 		else:
 			filters = {"parent_vimeo_folder": ("in", ["", None])}
 
-	names = frappe.get_all(
+	include_videos = bool(cint(include_videos))
+	rows = frappe.get_all(
 		"Vimeo Folder",
 		filters=filters,
-		pluck="name",
+		fields=["name"] if include_videos else FOLDER_LIST_FIELDS,
 		order_by="lft asc",
 	)
 	return [
 		_serialize_folder_doc(
-			frappe.get_doc("Vimeo Folder", folder_id),
-			include_videos=bool(cint(include_videos)),
+			frappe.get_doc("Vimeo Folder", row.name) if include_videos else row,
+			include_videos=include_videos,
 		)
-		for folder_id in names
+		for row in rows
 	]
 
 

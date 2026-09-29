@@ -20,22 +20,6 @@ class VimeoSettings(Document):
 		if self.upload_chunk_size_mb is None:
 			self.upload_chunk_size_mb = 1
 		self.upload_chunk_size_mb = max(1, int(self.upload_chunk_size_mb))
-		self._ensure_app_folder()
-
-	def _ensure_app_folder(self) -> None:
-		if not self.app_folder_name:
-			return
-		if self.app_folder_vimeo_id:
-			return
-
-		from frappe_vimeo.vimeo_client import get_client
-
-		try:
-			client = get_client(force=True)
-		except Exception as exc:
-			frappe.throw(_("Could not build Vimeo client: {0}").format(exc))
-
-		self._set_app_folder_from_remote(client, create_if_missing=True)
 
 	def _set_app_folder_from_remote(self, client, create_if_missing: bool = False) -> None:
 		from frappe_vimeo.vimeo_client import VimeoAPIError
@@ -167,20 +151,15 @@ class VimeoSettings(Document):
 		if not self.app_folder_vimeo_id:
 			frappe.throw(_("Configure and test App Folder Name in Vimeo Settings before syncing."))
 
-		# Enqueue folder pull (which often includes video relationships)
+		self.db_set("pull_status", "queued")
+		self.db_set("pull_error", "")
+		# One job ensures folders exist locally before their videos are linked.
 		frappe.enqueue(
-			"frappe_vimeo.tasks.pull_folders_from_vimeo",
+			"frappe_vimeo.tasks.pull_from_vimeo",
 			queue="long",
 			timeout=3600,
+			enqueue_after_commit=True,
 		)
-		
-		# Also enqueue a full video pull to ensure loose videos are imported
-		frappe.enqueue(
-			"frappe_vimeo.tasks.pull_videos_from_vimeo",
-			queue="long",
-			timeout=3600,
-		)
-		
 		return {"status": "queued"}
 
 
