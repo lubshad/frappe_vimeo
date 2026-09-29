@@ -51,3 +51,19 @@ class TestSearchContents(unittest.TestCase):
 		mock_frappe.db.get_value.return_value = None
 		self.assertEqual(search_contents("video"), {"items": [], "total": 0})
 		mock_frappe.db.sql.assert_not_called()
+
+	@patch("frappe_vimeo.api.search._require_manager")
+	@patch("frappe_vimeo.api.search.frappe")
+	@patch("frappe_vimeo.api._utils.frappe")
+	def test_folder_search_result_has_item_counts(self, mock_utils_frappe, mock_frappe, _manager) -> None:
+		mock_frappe.db.get_single_value.return_value = None
+		mock_frappe.db.sql.side_effect = [[(1,)], [{"kind": "folder", "name": "folder-1"}]]
+		mock_utils_frappe.db.sql.side_effect = [
+			[{"folder": "folder-1", "item_count": 1}],
+			[{"folder": "folder-1", "item_count": 2}],
+		]
+
+		result = search_contents("lesson")
+
+		self.assertEqual(result["items"][0]["child_count"], 1)
+		self.assertEqual(result["items"][0]["video_count"], 2)

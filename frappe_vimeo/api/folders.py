@@ -9,6 +9,7 @@ from frappe import _
 from frappe.utils import cint
 
 from frappe_vimeo.api._utils import (
+	_add_folder_item_counts,
 	_get_descendant_folder_names,
 	_queue_folder_sync,
 	_rebuild_folder_videos,
@@ -127,9 +128,11 @@ def get_folder_contents(name: str) -> dict:
 		breadcrumb.insert(0, _serialize_folder_doc(parent))
 		parent_name = parent.parent_vimeo_folder
 
+	serialized_children = [_serialize_folder_doc(child) for child in children]
+	_add_folder_item_counts(serialized_children)
 	return {
 		"folder": _serialize_folder_doc(doc),
-		"children": [_serialize_folder_doc(child) for child in children],
+		"children": serialized_children,
 		"videos": _serialize_folder_doc(doc, include_videos=True)["videos"],
 		"breadcrumb": breadcrumb,
 	}
@@ -175,13 +178,15 @@ def list_folder_records(
 		fields=["name"] if include_videos else FOLDER_LIST_FIELDS,
 		order_by="lft asc",
 	)
-	return [
+	folders = [
 		_serialize_folder_doc(
 			frappe.get_doc("Vimeo Folder", row.name) if include_videos else row,
 			include_videos=include_videos,
 		)
 		for row in rows
 	]
+	_add_folder_item_counts(folders)
+	return folders
 
 
 @frappe.whitelist()

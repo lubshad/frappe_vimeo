@@ -7,7 +7,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
-from frappe_vimeo.api._utils import _require_manager
+from frappe_vimeo.api._utils import _add_folder_item_counts, _require_manager
 
 
 @frappe.whitelist()
@@ -81,4 +81,5 @@ def search_contents(query: str, limit: int = 20, offset: int = 0) -> dict:
 		(*params, limit, offset),
 		as_dict=True,
 	)
+	_add_folder_item_counts([row for row in rows if row["kind"] == "folder"])
 	return {"items": rows, "total": total}

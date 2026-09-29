@@ -229,6 +229,36 @@ def _serialize_folder_doc(doc: Any, include_videos: bool = False) -> dict:
 	return payload
 
 
+def _add_folder_item_counts(folders: list[dict]) -> None:
+	"""Add direct child and distinct linked-video counts without per-folder queries."""
+	names = list({folder["name"] for folder in folders})
+	if not names:
+		return
+
+	placeholders = ", ".join(["%s"] * len(names))
+	children = frappe.db.sql(
+		f"""SELECT parent_vimeo_folder AS folder, COUNT(*) AS item_count
+		FROM `tabVimeo Folder`
+		WHERE parent_vimeo_folder IN ({placeholders})
+		GROUP BY parent_vimeo_folder""",
+		tuple(names),
+		as_dict=True,
+	)
+	videos = frappe.db.sql(
+		f"""SELECT parent AS folder, COUNT(DISTINCT video) AS item_count
+		FROM `tabVimeo Folder Video`
+		WHERE parenttype = 'Vimeo Folder' AND parent IN ({placeholders}) AND video IS NOT NULL
+		GROUP BY parent""",
+		tuple(names),
+		as_dict=True,
+	)
+	child_counts = {row["folder"]: row["item_count"] for row in children}
+	video_counts = {row["folder"]: row["item_count"] for row in videos}
+	for folder in folders:
+		folder["child_count"] = child_counts.get(folder["name"], 0)
+		folder["video_count"] = video_counts.get(folder["name"], 0)
+
+
 def _serialize_folder_videos(doc: Any) -> list[dict]:
 	video_names = _get_folder_video_names(doc)
 	if not video_names:
