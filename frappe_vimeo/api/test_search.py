@@ -27,8 +27,9 @@ class TestSearchContents(unittest.TestCase):
 		mock_frappe.db.sql.assert_not_called()
 
 	@patch("frappe_vimeo.api.search._require_manager")
+	@patch("frappe_vimeo.api.search._get_app_folder_name", return_value="VIMEO-FOLDER-22390594")
 	@patch("frappe_vimeo.api.search.frappe")
-	def test_searches_both_kinds_with_pagination_and_app_scope(self, mock_frappe, _manager) -> None:
+	def test_searches_both_kinds_with_pagination_and_app_scope(self, mock_frappe, _root, _manager) -> None:
 		mock_frappe.db.get_single_value.return_value = "Library"
 		mock_frappe.db.get_value.return_value = SimpleNamespace(lft=2, rgt=30)
 		row = {"kind": "video", "name": "video-1", "folder_name": "folder-2"}
@@ -37,6 +38,7 @@ class TestSearchContents(unittest.TestCase):
 		result = search_contents("Intro", limit=1, offset=2)
 
 		self.assertEqual(result, {"items": [row], "total": 3})
+		self.assertEqual(mock_frappe.db.get_value.call_args.args[1], "VIMEO-FOLDER-22390594")
 		count_sql, count_params = mock_frappe.db.sql.call_args_list[0].args
 		self.assertIn("tabVimeo Folder", count_sql)
 		self.assertIn("tabVimeo Video", count_sql)
@@ -45,8 +47,9 @@ class TestSearchContents(unittest.TestCase):
 		self.assertEqual(mock_frappe.db.sql.call_args_list[1].args[1], (*count_params, 1, 2))
 
 	@patch("frappe_vimeo.api.search._require_manager")
+	@patch("frappe_vimeo.api.search._get_app_folder_name", return_value=None)
 	@patch("frappe_vimeo.api.search.frappe")
-	def test_missing_app_root_returns_empty_without_querying_records(self, mock_frappe, _manager) -> None:
+	def test_missing_app_root_returns_empty_without_querying_records(self, mock_frappe, _root, _manager) -> None:
 		mock_frappe.db.get_single_value.return_value = "Library"
 		mock_frappe.db.get_value.return_value = None
 		self.assertEqual(search_contents("video"), {"items": [], "total": 0})

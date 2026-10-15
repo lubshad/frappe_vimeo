@@ -59,6 +59,21 @@ def _require_manager() -> None:
 		)
 
 
+def _get_app_folder_name() -> str | None:
+	"""Resolve the local app root by remote identity, not its mutable title."""
+	vimeo_id = frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_id")
+	root_filter = {"parent_vimeo_folder": ("in", ["", None])}
+	if vimeo_id:
+		name = frappe.db.get_value("Vimeo Folder", {**root_filter, "vimeo_id": vimeo_id}, "name")
+		if name:
+			return name
+
+	title = frappe.db.get_single_value("Vimeo Settings", "app_folder_name")
+	if title:
+		return frappe.db.get_value("Vimeo Folder", {**root_filter, "folder_name": title}, "name")
+	return None
+
+
 def _require_vimeo_configured() -> None:
 	"""Raise unless Vimeo Settings has the local fields needed for folder sync."""
 	settings = frappe.get_cached_doc("Vimeo Settings", "Vimeo Settings")
@@ -158,7 +173,7 @@ def _only_present(payload: dict[str, Any]) -> dict[str, Any]:
 def _apply_video_to_doc(doc: Any, normalized_video: dict) -> None:
 	for fieldname, payload_key in VIDEO_FIELD_MAP.items():
 		setattr(doc, fieldname, normalized_video.get(payload_key))
-	
+
 	if normalized_video.get("downloads"):
 		doc.set("downloads", [])
 		for d in normalized_video["downloads"]:
@@ -167,7 +182,6 @@ def _apply_video_to_doc(doc: Any, normalized_video: dict) -> None:
 				"link": d.get("link"),
 				"size": d.get("size")
 			})
-			
 	doc.last_synced_on = frappe.utils.now_datetime()
 
 

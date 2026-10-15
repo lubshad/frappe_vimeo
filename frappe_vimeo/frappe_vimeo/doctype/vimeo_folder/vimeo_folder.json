@@ -2,7 +2,7 @@
  "actions": [],
  "allow_import": 1,
  "allow_rename": 1,
- "autoname": "field:folder_name",
+ "autoname": "",
  "creation": "2026-04-16 19:10:00.000000",
  "default_view": "Tree",
  "doctype": "DocType",
@@ -147,7 +147,7 @@
  "modified_by": "Administrator",
  "module": "Frappe Vimeo",
  "name": "Vimeo Folder",
- "naming_rule": "By fieldname",
+ "naming_rule": "By script",
  "nsm_parent_field": "parent_vimeo_folder",
  "owner": "Administrator",
  "permissions": [

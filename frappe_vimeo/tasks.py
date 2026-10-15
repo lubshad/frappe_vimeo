@@ -10,8 +10,8 @@ import time
 import frappe
 
 from frappe_vimeo.api._utils import (
-	_apply_video_to_doc,
 	_apply_folder_to_doc,
+	_apply_video_to_doc,
 	_folder_needs_metadata_sync,
 	_folder_parent_ready,
 	_folder_parent_uri,
@@ -65,10 +65,10 @@ def _fetch_app_subtree(client: VimeoClient) -> tuple[list[dict], dict[str, list[
 	"""Walk from the configured root; /me/folders need not contain descendants."""
 	root_id = frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_id")
 	root_uri = frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_uri")
-	root_name = frappe.db.get_single_value("Vimeo Settings", "app_folder_name")
 	if not root_id or not root_uri:
 		raise VimeoAPIError(0, "Configure and test the Vimeo app folder before importing")
-	root = {"id": root_id, "uri": root_uri, "name": root_name or root_id, "parent_uri": None}
+	root = _normalize_folder(client.get_folder(root_id))
+	root["parent_uri"] = None
 	queue = [root]
 	folders: list[dict] = []
 	videos: dict[str, list[dict]] = {}
@@ -281,6 +281,9 @@ def sync_video_metadata(video_name: str) -> None:
 		return
 
 	raw: dict | None = None
+	# A queued push may outlive a newer authoritative import.
+	if not _video_needs_metadata_sync(doc):
+		return
 
 	try:
 		payload = _only_present(
@@ -319,6 +322,9 @@ def sync_vimeo_folder(folder_name: str) -> None:
 		return
 
 	doc = frappe.get_doc("Vimeo Folder", folder_name)
+	# Imports and completed pushes supersede old queued outbound jobs.
+	if not _folder_needs_metadata_sync(doc):
+		return
 
 	if not _folder_parent_ready(doc):
 		doc.db_set("sync_status", "blocked", update_modified=False)
@@ -486,17 +492,15 @@ def pull_videos_from_vimeo(snapshot: tuple[list[dict], dict[str, list[dict]]] | 
 				if video_name:
 					skipped += 1
 					video = frappe.get_doc("Vimeo Video", video_name)
-					if (normalized.get("name") and video.video_title != normalized["name"]) or (
-						normalized.get("privacy") and video.privacy != normalized["privacy"]
-					):
-						if normalized.get("name"):
-							video.video_title = normalized["name"]
-						if normalized.get("privacy"):
-							video.privacy = normalized["privacy"]
-						video.last_synced_on = frappe.utils.now_datetime()
-						video.flags.from_remote_sync = True
-						video.flags.ignore_version = True
-						video.save(ignore_permissions=True)
+					# Folder item listings can omit full video metadata.
+					if normalized.get("name"):
+						video.video_title = normalized["name"]
+					if normalized.get("privacy"):
+						video.privacy = normalized["privacy"]
+					video.flags.from_remote_sync = True
+					video.flags.ignore_version = True
+					video.save(ignore_permissions=True)
+					_mark_last_synced(video)
 				else:
 					try:
 						frappe.db.savepoint("vimeo_video_pull_insert")
@@ -505,6 +509,7 @@ def pull_videos_from_vimeo(snapshot: tuple[list[dict], dict[str, list[dict]]] | 
 						doc.flags.ignore_version = True
 						_apply_video_to_doc(doc, normalized)
 						doc.insert(ignore_permissions=True)
+						_mark_last_synced(doc)
 						video_name = doc.name
 						created += 1
 					except Exception as exc:
@@ -529,6 +534,7 @@ def pull_videos_from_vimeo(snapshot: tuple[list[dict], dict[str, list[dict]]] | 
 		folder.flags.from_remote_sync = True
 		folder.flags.ignore_version = True
 		folder.save(ignore_permissions=True)
+		_mark_folder_last_synced(folder)
 
 	frappe.db.commit()
 	return {"created": created, "skipped": skipped, "errors": errors}
@@ -568,11 +574,6 @@ def pull_folders_from_vimeo(snapshot: tuple[list[dict], dict[str, list[dict]]] |
 		next_pending: list[dict] = []
 		progress = False
 		for remote in pending:
-			if frappe.db.exists("Vimeo Folder", {"vimeo_id": remote["id"]}):
-				skipped += 1
-				progress = True
-				continue
-
 			parent_uri = remote.get("parent_uri")
 			parent_name: str | None = None
 			if parent_uri:
@@ -590,7 +591,9 @@ def pull_folders_from_vimeo(snapshot: tuple[list[dict], dict[str, list[dict]]] |
 						parent.is_group = 1
 						parent.flags.from_remote_sync = True
 						parent.save(ignore_permissions=True)
-				doc = frappe.new_doc("Vimeo Folder")
+						_mark_folder_last_synced(parent)
+				existing_name = frappe.db.get_value("Vimeo Folder", {"vimeo_id": remote["id"]}, "name")
+				doc = frappe.get_doc("Vimeo Folder", existing_name) if existing_name else frappe.new_doc("Vimeo Folder")
 				doc.flags.from_remote_sync = True
 				doc.flags.ignore_version = True
 				_apply_folder_to_doc(doc, remote)
@@ -599,8 +602,13 @@ def pull_folders_from_vimeo(snapshot: tuple[list[dict], dict[str, list[dict]]] |
 				doc.parent_vimeo_folder = parent_name
 				if any(r.get("parent_uri") == remote.get("uri") for r in remotes):
 					doc.is_group = 1
-				doc.insert(ignore_permissions=True)
-				created += 1
+				if existing_name:
+					doc.save(ignore_permissions=True)
+					skipped += 1
+				else:
+					doc.insert(ignore_permissions=True)
+					created += 1
+				_mark_folder_last_synced(doc)
 				progress = True
 			except Exception as exc:
 				frappe.db.rollback(save_point="vimeo_folder_pull_insert")

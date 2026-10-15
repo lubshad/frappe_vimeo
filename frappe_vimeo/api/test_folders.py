@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from frappe_vimeo import api
-from frappe_vimeo.api._utils import _add_folder_item_counts
+from frappe_vimeo.api._utils import _add_folder_item_counts, _get_app_folder_name
 from frappe_vimeo.api.folders import get_app_folder_name, get_folder_contents, list_folder_records
 
 
@@ -25,18 +25,50 @@ def _folder(name: str, parent: str | None = None) -> SimpleNamespace:
 
 class TestGetFolderContents(unittest.TestCase):
 	@patch("frappe_vimeo.api.folders._require_manager")
-	@patch("frappe_vimeo.api.folders.frappe")
-	def test_app_folder_name_is_exposed_on_public_api(self, mock_frappe, _manager) -> None:
-		mock_frappe.db.get_single_value.return_value = "MCAL"
-		mock_frappe.db.get_value.return_value = "app-folder"
+	@patch("frappe_vimeo.api.folders._get_app_folder_name", return_value="app-folder")
+	def test_app_folder_name_is_exposed_on_public_api(self, resolve_root, _manager) -> None:
 
 		self.assertIs(api.get_app_folder_name, get_app_folder_name)
 		self.assertEqual(api.get_app_folder_name(), "app-folder")
+		resolve_root.assert_called_once_with()
+
+	@patch("frappe_vimeo.api._utils.frappe")
+	def test_resolves_imported_root_by_vimeo_id_not_title(self, mock_frappe) -> None:
+		mock_frappe.db.get_single_value.return_value = "22390594"
+		mock_frappe.db.get_value.return_value = "VIMEO-FOLDER-22390594"
+		self.assertEqual(_get_app_folder_name(), "VIMEO-FOLDER-22390594")
 		mock_frappe.db.get_value.assert_called_once_with(
-			"Vimeo Folder",
-			{"folder_name": "MCAL", "parent_vimeo_folder": ("in", ["", None])},
-			"name",
+			"Vimeo Folder", {"parent_vimeo_folder": ("in", ["", None]), "vimeo_id": "22390594"}, "name"
 		)
+
+	@patch("frappe_vimeo.api._utils.frappe")
+	def test_legacy_root_falls_back_to_title(self, mock_frappe) -> None:
+		mock_frappe.db.get_single_value.side_effect = [None, "MCAL"]
+		mock_frappe.db.get_value.return_value = "legacy-root"
+		self.assertEqual(_get_app_folder_name(), "legacy-root")
+		self.assertEqual(mock_frappe.db.get_value.call_args.args[1]["folder_name"], "MCAL")
+
+	@patch("frappe_vimeo.api._utils.frappe")
+	def test_missing_configured_root_does_not_resolve(self, mock_frappe) -> None:
+		mock_frappe.db.get_single_value.side_effect = ["22390594", "MCAL"]
+		mock_frappe.db.get_value.return_value = None
+		self.assertIsNone(_get_app_folder_name())
+
+	@patch("frappe_vimeo.api.folders._require_manager")
+	@patch("frappe_vimeo.api.folders._get_app_folder_name", return_value="VIMEO-FOLDER-22390594")
+	@patch("frappe_vimeo.api.folders.frappe")
+	def test_home_lists_children_of_resolved_root(self, mock_frappe, _root, _manager) -> None:
+		mock_frappe.get_all.return_value = []
+		self.assertEqual(list_folder_records(), [])
+		self.assertEqual(mock_frappe.get_all.call_args.kwargs["filters"], {"parent_vimeo_folder": "VIMEO-FOLDER-22390594"})
+
+	@patch("frappe_vimeo.api.folders._require_manager")
+	@patch("frappe_vimeo.api.folders._get_app_folder_name", return_value=None)
+	@patch("frappe_vimeo.api.folders.frappe")
+	def test_missing_configured_root_does_not_list_unrelated_roots(self, mock_frappe, _root, _manager) -> None:
+		mock_frappe.db.get_single_value.return_value = "MCAL"
+		self.assertEqual(list_folder_records(), [])
+		mock_frappe.get_all.assert_not_called()
 
 	@patch("frappe_vimeo.api.folders._require_manager")
 	@patch("frappe_vimeo.api.folders.frappe")

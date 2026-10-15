@@ -7,7 +7,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
-from frappe_vimeo.api._utils import _add_folder_item_counts, _require_manager
+from frappe_vimeo.api._utils import _add_folder_item_counts, _get_app_folder_name, _require_manager
 
 
 @frappe.whitelist()
@@ -31,10 +31,13 @@ def search_contents(query: str, limit: int = 20, offset: int = 0) -> dict:
 	folder_scope = ""
 	video_scope = ""
 	scope_params: tuple = ()
-	if app_folder_title:
+	if app_folder_title or frappe.db.get_single_value("Vimeo Settings", "app_folder_vimeo_id"):
+		app_folder_name = _get_app_folder_name()
+		if not app_folder_name:
+			return {"items": [], "total": 0}
 		app_folder = frappe.db.get_value(
 			"Vimeo Folder",
-			{"folder_name": app_folder_title, "parent_vimeo_folder": ("in", ["", None])},
+			app_folder_name,
 			["lft", "rgt"],
 			as_dict=True,
 		)

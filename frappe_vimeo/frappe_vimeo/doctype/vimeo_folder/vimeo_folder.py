@@ -26,6 +26,8 @@ class VimeoFolder(NestedSet):
 		# folder_name intact and use the stable remote ID for imported records.
 		if getattr(self.flags, "from_remote_sync", False) and self.vimeo_id:
 			self.name = f"VIMEO-FOLDER-{self.vimeo_id}"
+		else:
+			self.name = (self.folder_name or "").strip()
 
 	def validate(self) -> None:
 		if getattr(self.flags, "from_remote_sync", False):

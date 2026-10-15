@@ -11,6 +11,11 @@ from frappe_vimeo.vimeo_client import VimeoAPIError
 
 
 class TestVimeoPull(unittest.TestCase):
+	def setUp(self) -> None:
+		clock = patch.object(tasks.frappe.utils, "now_datetime", return_value="2026-10-15 21:00:00")
+		clock.start()
+		self.addCleanup(clock.stop)
+
 	def test_imported_folders_use_remote_id_even_when_names_repeat(self) -> None:
 		folder = SimpleNamespace(name=None, folder_name="PHYSICS", vimeo_id="42", flags=SimpleNamespace(from_remote_sync=True))
 		VimeoFolder.autoname(folder)
@@ -35,6 +40,7 @@ class TestVimeoPull(unittest.TestCase):
 
 	def test_subtree_walks_children_and_retains_each_folders_videos(self) -> None:
 		client = MagicMock()
+		client.get_folder.return_value = {"uri": "/users/3/projects/1", "name": "MCAL"}
 		client.list_folder_items.side_effect = [
 			{"data": [{"type": "folder", "folder": {"uri": "/users/3/projects/2", "name": "Lessons"}}, {"type": "video", "video": {"uri": "/videos/42"}}], "paging": {}},
 			{"data": [{"type": "folder", "folder": {"uri": "/users/3/projects/3", "name": "Unit 1"}}, {"type": "video", "video": {"uri": "/videos/43"}}], "paging": {}},
@@ -61,8 +67,7 @@ class TestVimeoPull(unittest.TestCase):
 		new_doc = MagicMock()
 		db = MagicMock()
 		db.get_single_value.return_value = "1"
-		db.exists.side_effect = lambda _, filters: filters["vimeo_id"] == "1"
-		db.get_value.return_value = "MCAL"
+		db.get_value.side_effect = lambda _, filters, field: "MCAL" if filters.get("vimeo_id") == "1" or filters.get("vimeo_uri") else None
 		with (
 			patch.object(tasks.frappe, "db", db),
 			patch.object(tasks.frappe, "get_doc", return_value=parent_doc),
@@ -72,14 +77,14 @@ class TestVimeoPull(unittest.TestCase):
 			result = tasks.pull_folders_from_vimeo(([root, child], {"1": [], "2": []}))
 		self.assertEqual(result, {"created": 1, "skipped": 1, "errors": 0})
 		self.assertEqual(parent_doc.is_group, 1)
-		parent_doc.save.assert_called_once_with(ignore_permissions=True)
+		self.assertTrue(parent_doc.flags.from_remote_sync)
 		self.assertEqual(new_doc.parent_vimeo_folder, "MCAL")
 		new_doc.insert.assert_called_once_with(ignore_permissions=True)
 
 	def test_video_pull_links_existing_video_from_folder_items(self) -> None:
 		folder = MagicMock()
 		folder.get.return_value = []
-		video = SimpleNamespace(video_title="Lesson", privacy=None)
+		video = MagicMock(video_title="Lesson", privacy=None)
 		db = MagicMock()
 		db.get_single_value.return_value = "1"
 		db.get_value.return_value = "VIMEO-0042"
@@ -97,3 +102,46 @@ class TestVimeoPull(unittest.TestCase):
 		folder.save.assert_called_once_with(ignore_permissions=True)
 		get_client.return_value.add_folder_items.assert_not_called()
 		get_client.return_value.remove_folder_items.assert_not_called()
+
+	def test_import_updates_existing_folder_without_outbound_calls(self) -> None:
+		folder = MagicMock()
+		db = MagicMock()
+		db.get_single_value.return_value = "1"
+		db.get_value.return_value = "VIMEO-FOLDER-1"
+		remote = {"id": "1", "uri": "/users/3/projects/1", "name": "Original Vimeo title"}
+		with (
+			patch.object(tasks.frappe, "db", db),
+			patch.object(tasks.frappe, "get_doc", return_value=folder),
+			patch.object(tasks.frappe, "enqueue") as enqueue,
+			patch.object(tasks, "get_client") as client,
+		):
+			result = tasks.pull_folders_from_vimeo(([remote], {"1": []}))
+		self.assertEqual(result, {"created": 0, "skipped": 1, "errors": 0})
+		self.assertEqual(folder.folder_name, "Original Vimeo title")
+		self.assertTrue(folder.flags.from_remote_sync)
+		folder.save.assert_called_once_with(ignore_permissions=True)
+		folder.db_set.assert_called_with("last_synced_on", folder.last_synced_on, update_modified=False)
+		enqueue.assert_not_called()
+		client.assert_not_called()
+
+	def test_stale_folder_push_does_not_write_to_vimeo(self) -> None:
+		with (
+			patch.object(tasks.frappe, "db", MagicMock()) as db,
+			patch.object(tasks.frappe, "get_doc"),
+			patch.object(tasks, "_folder_needs_metadata_sync", return_value=False),
+			patch.object(tasks, "get_client") as client,
+		):
+			db.exists.return_value = True
+			tasks.sync_vimeo_folder("folder-1")
+		client.assert_not_called()
+
+	def test_stale_video_push_does_not_write_to_vimeo(self) -> None:
+		with (
+			patch.object(tasks.frappe, "db", MagicMock()) as db,
+			patch.object(tasks.frappe, "get_doc"),
+			patch.object(tasks, "_video_needs_metadata_sync", return_value=False),
+			patch.object(tasks, "get_client") as client,
+		):
+			db.exists.return_value = True
+			tasks.sync_video_metadata("video-1")
+		client.assert_not_called()

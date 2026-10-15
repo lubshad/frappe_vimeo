@@ -5,7 +5,6 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-
 from frappe_vimeo.api._utils import _require_manager
 
 CACHE_KEY = "vimeo_settings_snapshot"
@@ -88,24 +87,22 @@ class VimeoSettings(Document):
 
 	def _upsert_local_app_folder(self) -> None:
 		# Create/Update local Vimeo Folder record
-		if not frappe.db.exists("Vimeo Folder", self.app_folder_name):
-			doc = frappe.new_doc("Vimeo Folder")
-			doc.folder_name = self.app_folder_name
-			doc.vimeo_id = self.app_folder_vimeo_id
-			doc.vimeo_uri = self.app_folder_vimeo_uri
-			doc.sync_status = "synced"
-			doc.flags.from_remote_sync = True
-			doc.insert(ignore_permissions=True)
+		from frappe_vimeo.tasks import _mark_folder_last_synced
+
+		name = frappe.db.get_value("Vimeo Folder", {"vimeo_id": self.app_folder_vimeo_id}, "name")
+		if not name and frappe.db.exists("Vimeo Folder", self.app_folder_name):
+			name = self.app_folder_name
+		doc = frappe.get_doc("Vimeo Folder", name) if name else frappe.new_doc("Vimeo Folder")
+		doc.folder_name = self.app_folder_name
+		doc.vimeo_id = self.app_folder_vimeo_id
+		doc.vimeo_uri = self.app_folder_vimeo_uri
+		doc.sync_status = "synced"
+		doc.flags.from_remote_sync = True
+		if name:
+			doc.save(ignore_permissions=True)
 		else:
-			frappe.db.set_value(
-				"Vimeo Folder",
-				self.app_folder_name,
-				{
-					"vimeo_id": self.app_folder_vimeo_id,
-					"vimeo_uri": self.app_folder_vimeo_uri,
-					"sync_status": "synced",
-				},
-			)
+			doc.insert(ignore_permissions=True)
+		_mark_folder_last_synced(doc)
 
 	def get_access_token(self) -> str:
 		token = self.get_password("access_token", raise_exception=False)
